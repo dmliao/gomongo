@@ -1,0 +1,6 @@
+bin/
+
+.gopath
+.godeps
+
+vendor/
