@@ -16,3 +16,7 @@ type FindOpts struct {
 type UpdateOpts struct {
 	Multi bool
 }
+
+type RemoveOpts struct {
+	Multi bool
+}

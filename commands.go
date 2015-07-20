@@ -317,3 +317,59 @@ func (c *Connection) Update(namespace string, selector interface{}, update inter
 		message: "Something failed",
 	}
 }
+
+func (c *Connection) Remove(namespace string, selector interface{}, options *RemoveOpts) error {
+	database, collection, err := ParseNamespace(namespace)
+	if err != nil {
+		return err
+	}
+
+	limit := 1
+	if options != nil {
+		if options.Multi {
+			limit = 0
+		}
+	}
+
+	deletes := make([]bson.M, 1)
+	deletes[0] = bson.M{
+		"q":     selector,
+		"limit": limit,
+	}
+
+	deleteCommand := bson.D{{"delete", collection}, {"deletes", deletes}}
+
+	var result bson.M
+	c.Run(database, deleteCommand, &result)
+
+	if convert.ToInt(result["ok"]) == 1 {
+		return nil
+	}
+
+	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
+	if writeConcernError != nil {
+		return WriteConcernError{
+			Code:   convert.ToInt32(writeConcernError["code"]),
+			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
+		}
+	}
+
+	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
+	if err == nil {
+		errors := WriteErrors{}
+		errors.Errors = make([]WriteError, len(writeErrors))
+		for i := 0; i < len(writeErrors); i++ {
+			writeError := WriteError{
+				Index:  convert.ToInt32(writeErrors[i]["index"]),
+				Code:   convert.ToInt32(writeErrors[i]["code"]),
+				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
+			}
+			errors.Errors[i] = writeError
+		}
+		return errors
+	}
+
+	return MongoError{
+		message: "Something failed",
+	}
+}
