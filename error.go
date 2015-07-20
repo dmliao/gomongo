@@ -10,17 +10,17 @@ func (m MongoError) Error() string {
 	return m.message
 }
 
-type InsertWriteError struct {
+type WriteError struct {
 	Index  int32
 	Code   int32
 	ErrMsg string
 }
 
-type InsertErrors struct {
-	Errors []InsertWriteError
+type WriteErrors struct {
+	Errors []WriteError
 }
 
-func (i InsertErrors) Error() string {
+func (i WriteErrors) Error() string {
 	return "Insert write errors!"
 }
 

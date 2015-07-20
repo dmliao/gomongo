@@ -29,6 +29,8 @@ func main() {
 	fmt.Printf("%#v\n", result)
 
 	err = conn.Insert("test.driver", bson.M{"price": 5})
+
+	err = conn.Update("test.driver", bson.M{"price": 5}, bson.M{"price": 15}, nil)
 	cursor2, err := conn.Find("test.driver", bson.M{}, nil)
 	for cursor2.HasNext() {
 		err = cursor2.Next(&result)

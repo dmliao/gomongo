@@ -244,10 +244,10 @@ func (c *Connection) Insert(namespace string, docs ...interface{}) error {
 
 	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
 	if err == nil {
-		errors := InsertErrors{}
-		errors.Errors = make([]InsertWriteError, len(writeErrors))
+		errors := WriteErrors{}
+		errors.Errors = make([]WriteError, len(writeErrors))
 		for i := 0; i < len(writeErrors); i++ {
-			writeError := InsertWriteError{
+			writeError := WriteError{
 				Index:  convert.ToInt32(writeErrors[i]["index"]),
 				Code:   convert.ToInt32(writeErrors[i]["code"]),
 				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
@@ -262,9 +262,58 @@ func (c *Connection) Insert(namespace string, docs ...interface{}) error {
 	}
 }
 
-func (c *Connection) Update(namespace string, selector interface{}, update interface{}, opts *UpdateOpts) error {
+func (c *Connection) Update(namespace string, selector interface{}, update interface{}, options *UpdateOpts) error {
 	database, collection, err := ParseNamespace(namespace)
 	if err != nil {
 		return err
+	}
+
+	multi := false
+	if options != nil {
+		multi = options.Multi
+	}
+
+	updates := make([]bson.M, 1)
+	updates[0] = bson.M{
+		"q":      selector,
+		"u":      update,
+		"upsert": false,
+		"multi":  multi,
+	}
+
+	updateCommand := bson.D{{"update", collection}, {"updates", updates}}
+
+	var result bson.M
+	c.Run(database, updateCommand, &result)
+
+	if convert.ToInt(result["ok"]) == 1 {
+		return nil
+	}
+
+	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
+	if writeConcernError != nil {
+		return WriteConcernError{
+			Code:   convert.ToInt32(writeConcernError["code"]),
+			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
+		}
+	}
+
+	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
+	if err == nil {
+		errors := WriteErrors{}
+		errors.Errors = make([]WriteError, len(writeErrors))
+		for i := 0; i < len(writeErrors); i++ {
+			writeError := WriteError{
+				Index:  convert.ToInt32(writeErrors[i]["index"]),
+				Code:   convert.ToInt32(writeErrors[i]["code"]),
+				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
+			}
+			errors.Errors[i] = writeError
+		}
+		return errors
+	}
+
+	return MongoError{
+		message: "Something failed",
 	}
 }
