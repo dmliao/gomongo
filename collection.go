@@ -17,8 +17,25 @@ const (
 	OP_KILL_CURSORS       = 2007
 )
 
-func (c *Connection) Find(namespace string, query interface{}, options *FindOpts) (Cursor, error) {
-	requestID := c.nextID()
+type Collection interface {
+	Find(query interface{}, options *FindOpts) (Cursor, error)
+	Insert(docs ...interface{}) error
+	Update(selector interface{}, update interface{}, options *UpdateOpts) error
+	Remove(selector interface{}, options *RemoveOpts) error
+	GetMore(cursor Cursor) (Cursor, error)
+	KillCursors(cursors ...Cursor) error
+	// GetCount(query interface{}) int64
+}
+
+type C struct {
+	name     string
+	database *DB
+	cursors  map[int64]*cursorObj
+}
+
+func (c *C) Find(query interface{}, options *FindOpts) (Cursor, error) {
+	namespace := c.database.GetName() + "." + c.name
+	requestID := c.database.mongo.conn.nextID()
 
 	limit := int32(0)
 	skip := int32(0)
@@ -71,21 +88,20 @@ func (c *Connection) Find(namespace string, query interface{}, options *FindOpts
 	input[2] = respSize[2]
 	input[3] = respSize[3]
 
-	err = c.send(input)
+	err = c.database.mongo.conn.send(input)
 	if err != nil {
 		return nil, err
 	}
 
 	cursor := cursorObj{
-		conn:      c,
-		namespace: namespace,
-		requestID: requestID,
-		limit:     limit,
-		batchSize: batchSize,
-		flags:     flags,
+		collection: c,
+		requestID:  requestID,
+		limit:      limit,
+		batchSize:  batchSize,
+		flags:      flags,
 	}
 
-	err = c.receiveFindResponse(&cursor)
+	err = c.database.mongo.conn.receiveFindResponse(&cursor)
 
 	if err != nil {
 		return nil, err
@@ -96,32 +112,154 @@ func (c *Connection) Find(namespace string, query interface{}, options *FindOpts
 	return &cursor, nil
 }
 
-func (c *Connection) KillCursors(cursors ...Cursor) error {
-	requestID := c.nextID()
-	responseTo := int32(0)
-	buf := new(bytes.Buffer)
-	buffer.WriteToBuf(buf, int32(0), requestID, responseTo, int32(OP_KILL_CURSORS), int32(len(cursors)))
-	for _, cursor := range cursors {
-		buffer.WriteToBuf(buf, cursor.ID())
-	}
-	input := buf.Bytes()
+func (c *C) Insert(docs ...interface{}) error {
+	collection := c.name
 
-	respSize := make([]byte, 4)
-	binary.LittleEndian.PutUint32(respSize, uint32(len(input)))
-	input[0] = respSize[0]
-	input[1] = respSize[1]
-	input[2] = respSize[2]
-	input[3] = respSize[3]
+	insertCommand := bson.D{{"insert", collection}, {"documents", docs}}
 
-	err := c.send(input)
-	if err != nil {
-		return err
+	var result bson.M
+	c.database.ExecuteCommand(insertCommand, &result)
+
+	if convert.ToInt(result["ok"]) == 1 {
+		return nil
 	}
-	return nil
+
+	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
+	if writeConcernError != nil {
+		return WriteConcernError{
+			Code:   convert.ToInt32(writeConcernError["code"]),
+			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
+		}
+	}
+
+	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
+	if err == nil {
+		errors := WriteErrors{}
+		errors.Errors = make([]WriteError, len(writeErrors))
+		for i := 0; i < len(writeErrors); i++ {
+			writeError := WriteError{
+				Index:  convert.ToInt32(writeErrors[i]["index"]),
+				Code:   convert.ToInt32(writeErrors[i]["code"]),
+				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
+			}
+			errors.Errors[i] = writeError
+		}
+		return errors
+	}
+
+	return MongoError{
+		message: "Something failed",
+	}
 }
 
-func (c *Connection) GetMore(cursor Cursor) (Cursor, error) {
-	requestID := c.nextID()
+func (c *C) Update(selector interface{}, update interface{}, options *UpdateOpts) error {
+	collection := c.name
+
+	multi := false
+	if options != nil {
+		multi = options.Multi
+	}
+
+	updates := make([]bson.M, 1)
+	updates[0] = bson.M{
+		"q":      selector,
+		"u":      update,
+		"upsert": false,
+		"multi":  multi,
+	}
+
+	updateCommand := bson.D{{"update", collection}, {"updates", updates}}
+
+	var result bson.M
+	c.database.ExecuteCommand(updateCommand, &result)
+
+	if convert.ToInt(result["ok"]) == 1 {
+		return nil
+	}
+
+	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
+	if writeConcernError != nil {
+		return WriteConcernError{
+			Code:   convert.ToInt32(writeConcernError["code"]),
+			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
+		}
+	}
+
+	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
+	if err == nil {
+		errors := WriteErrors{}
+		errors.Errors = make([]WriteError, len(writeErrors))
+		for i := 0; i < len(writeErrors); i++ {
+			writeError := WriteError{
+				Index:  convert.ToInt32(writeErrors[i]["index"]),
+				Code:   convert.ToInt32(writeErrors[i]["code"]),
+				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
+			}
+			errors.Errors[i] = writeError
+		}
+		return errors
+	}
+
+	return MongoError{
+		message: "Something failed",
+	}
+}
+
+func (c *C) Remove(selector interface{}, options *RemoveOpts) error {
+	collection := c.name
+
+	limit := 1
+	if options != nil {
+		if options.Multi {
+			limit = 0
+		}
+	}
+
+	deletes := make([]bson.M, 1)
+	deletes[0] = bson.M{
+		"q":     selector,
+		"limit": limit,
+	}
+
+	deleteCommand := bson.D{{"delete", collection}, {"deletes", deletes}}
+
+	var result bson.M
+	c.database.ExecuteCommand(deleteCommand, &result)
+
+	if convert.ToInt(result["ok"]) == 1 {
+		return nil
+	}
+
+	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
+	if writeConcernError != nil {
+		return WriteConcernError{
+			Code:   convert.ToInt32(writeConcernError["code"]),
+			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
+		}
+	}
+
+	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
+	if err == nil {
+		errors := WriteErrors{}
+		errors.Errors = make([]WriteError, len(writeErrors))
+		for i := 0; i < len(writeErrors); i++ {
+			writeError := WriteError{
+				Index:  convert.ToInt32(writeErrors[i]["index"]),
+				Code:   convert.ToInt32(writeErrors[i]["code"]),
+				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
+			}
+			errors.Errors[i] = writeError
+		}
+		return errors
+	}
+
+	return MongoError{
+		message: "Something failed",
+	}
+}
+
+func (c *C) GetMore(cursor Cursor) (Cursor, error) {
+	requestID := c.database.mongo.conn.nextID()
 	responseTo := int32(0)
 
 	fullCollectionBytes := []byte(cursor.Namespace())
@@ -141,7 +279,7 @@ func (c *Connection) GetMore(cursor Cursor) (Cursor, error) {
 	input[2] = respSize[2]
 	input[3] = respSize[3]
 
-	err := c.send(input)
+	err := c.database.mongo.conn.send(input)
 	if err != nil {
 		return nil, err
 	}
@@ -152,19 +290,19 @@ func (c *Connection) GetMore(cursor Cursor) (Cursor, error) {
 		cObj, ok2 = c.cursors[cursor.ID()]
 		if !ok2 {
 			cObj = &cursorObj{
-				conn:      c,
-				cursorID:  cursor.ID(),
-				requestID: requestID,
-				namespace: cursor.Namespace(),
-				limit:     cursor.Limit(),
-				batchSize: cursor.BatchSize(),
-				err:       cursor.Error(),
+				collection: c,
+				cursorID:   cursor.ID(),
+				requestID:  requestID,
+				namespace:  cursor.Namespace(),
+				limit:      cursor.Limit(),
+				batchSize:  cursor.BatchSize(),
+				err:        cursor.Error(),
 			}
 			c.cursors[cursor.ID()] = cObj
 		}
 	}
 
-	err = c.receiveFindResponse(cObj)
+	err = c.database.mongo.conn.receiveFindResponse(cObj)
 
 	if err != nil {
 		return nil, err
@@ -172,29 +310,14 @@ func (c *Connection) GetMore(cursor Cursor) (Cursor, error) {
 	return cObj, nil
 }
 
-func (c *Connection) Run(database string, command interface{}, result interface{}) error {
-	commandBytes, err := bson.Marshal(command)
-	if err != nil {
-		return err
-	}
-
-	namespace := database + ".$cmd"
-
-	requestID := c.nextID()
-
-	limit := int32(-1)
-	skip := int32(0)
+func (c *C) KillCursors(cursors ...Cursor) error {
+	requestID := c.database.mongo.conn.nextID()
 	responseTo := int32(0)
-
-	// flags
-	flags := int32(0)
-	fullCollectionBytes := []byte(namespace)
-	fullCollectionBytes = append(fullCollectionBytes, byte('\x00'))
-
 	buf := new(bytes.Buffer)
-	buffer.WriteToBuf(buf, int32(0), requestID, responseTo, int32(OP_QUERY), flags, fullCollectionBytes,
-		skip, limit, commandBytes)
-
+	buffer.WriteToBuf(buf, int32(0), requestID, responseTo, int32(OP_KILL_CURSORS), int32(len(cursors)))
+	for _, cursor := range cursors {
+		buffer.WriteToBuf(buf, cursor.ID())
+	}
 	input := buf.Bytes()
 
 	respSize := make([]byte, 4)
@@ -204,172 +327,13 @@ func (c *Connection) Run(database string, command interface{}, result interface{
 	input[2] = respSize[2]
 	input[3] = respSize[3]
 
-	err = c.send(input)
+	err := c.database.mongo.conn.send(input)
 	if err != nil {
 		return err
 	}
-
-	res, err := c.receive()
-	if err != nil {
-		return err
+	for _, cursor := range cursors {
+		c.cursors[cursor.ID()] = nil
 	}
 
-	resultBytes := res.Document[0]
-	return bson.Unmarshal(resultBytes, result)
-
-}
-
-func (c *Connection) Insert(namespace string, docs ...interface{}) error {
-	database, collection, err := ParseNamespace(namespace)
-	if err != nil {
-		return err
-	}
-
-	insertCommand := bson.D{{"insert", collection}, {"documents", docs}}
-
-	var result bson.M
-	c.Run(database, insertCommand, &result)
-
-	if convert.ToInt(result["ok"]) == 1 {
-		return nil
-	}
-
-	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
-	if writeConcernError != nil {
-		return WriteConcernError{
-			Code:   convert.ToInt32(writeConcernError["code"]),
-			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
-		}
-	}
-
-	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
-	if err == nil {
-		errors := WriteErrors{}
-		errors.Errors = make([]WriteError, len(writeErrors))
-		for i := 0; i < len(writeErrors); i++ {
-			writeError := WriteError{
-				Index:  convert.ToInt32(writeErrors[i]["index"]),
-				Code:   convert.ToInt32(writeErrors[i]["code"]),
-				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
-			}
-			errors.Errors[i] = writeError
-		}
-		return errors
-	}
-
-	return MongoError{
-		message: "Something failed",
-	}
-}
-
-func (c *Connection) Update(namespace string, selector interface{}, update interface{}, options *UpdateOpts) error {
-	database, collection, err := ParseNamespace(namespace)
-	if err != nil {
-		return err
-	}
-
-	multi := false
-	if options != nil {
-		multi = options.Multi
-	}
-
-	updates := make([]bson.M, 1)
-	updates[0] = bson.M{
-		"q":      selector,
-		"u":      update,
-		"upsert": false,
-		"multi":  multi,
-	}
-
-	updateCommand := bson.D{{"update", collection}, {"updates", updates}}
-
-	var result bson.M
-	c.Run(database, updateCommand, &result)
-
-	if convert.ToInt(result["ok"]) == 1 {
-		return nil
-	}
-
-	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
-	if writeConcernError != nil {
-		return WriteConcernError{
-			Code:   convert.ToInt32(writeConcernError["code"]),
-			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
-		}
-	}
-
-	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
-	if err == nil {
-		errors := WriteErrors{}
-		errors.Errors = make([]WriteError, len(writeErrors))
-		for i := 0; i < len(writeErrors); i++ {
-			writeError := WriteError{
-				Index:  convert.ToInt32(writeErrors[i]["index"]),
-				Code:   convert.ToInt32(writeErrors[i]["code"]),
-				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
-			}
-			errors.Errors[i] = writeError
-		}
-		return errors
-	}
-
-	return MongoError{
-		message: "Something failed",
-	}
-}
-
-func (c *Connection) Remove(namespace string, selector interface{}, options *RemoveOpts) error {
-	database, collection, err := ParseNamespace(namespace)
-	if err != nil {
-		return err
-	}
-
-	limit := 1
-	if options != nil {
-		if options.Multi {
-			limit = 0
-		}
-	}
-
-	deletes := make([]bson.M, 1)
-	deletes[0] = bson.M{
-		"q":     selector,
-		"limit": limit,
-	}
-
-	deleteCommand := bson.D{{"delete", collection}, {"deletes", deletes}}
-
-	var result bson.M
-	c.Run(database, deleteCommand, &result)
-
-	if convert.ToInt(result["ok"]) == 1 {
-		return nil
-	}
-
-	writeConcernError := convert.ToBSONMap(result["writeConcernError"])
-	if writeConcernError != nil {
-		return WriteConcernError{
-			Code:   convert.ToInt32(writeConcernError["code"]),
-			ErrMsg: convert.ToString(writeConcernError["errmsg"]),
-		}
-	}
-
-	writeErrors, err := convert.ConvertToBSONMapSlice(result["writeErrors"])
-	if err == nil {
-		errors := WriteErrors{}
-		errors.Errors = make([]WriteError, len(writeErrors))
-		for i := 0; i < len(writeErrors); i++ {
-			writeError := WriteError{
-				Index:  convert.ToInt32(writeErrors[i]["index"]),
-				Code:   convert.ToInt32(writeErrors[i]["code"]),
-				ErrMsg: convert.ToString(writeErrors[i]["errmsg"]),
-			}
-			errors.Errors[i] = writeError
-		}
-		return errors
-	}
-
-	return MongoError{
-		message: "Something failed",
-	}
+	return nil
 }

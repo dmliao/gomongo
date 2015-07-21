@@ -4,13 +4,16 @@ import (
 	"strings"
 )
 
-func Connect(address string) (*Connection, error) {
+func Connect(address string) (Mongo, error) {
 	if strings.LastIndex(address, ":") <= strings.LastIndex(address, "]") {
 		address = address + ":27017"
 	}
 	c := Connection{
 		address: address,
-		cursors: make(map[int64]*cursorObj),
 	}
-	return &c, c.connect()
+
+	m := MongoDB{
+		conn: &c,
+	}
+	return &m, c.connect()
 }

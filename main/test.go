@@ -7,15 +7,16 @@ import (
 )
 
 func main() {
-	conn, err := gomongo.Connect("localhost")
+	mongo, err := gomongo.Connect("localhost")
 	if err != nil {
 		fmt.Printf("Error: %v", err)
 	}
-	fmt.Printf("%#v", conn)
+	fmt.Printf("%#v", mongo)
 	opts := &gomongo.FindOpts{
 		BatchSize: 2,
 	}
-	cursor, err := conn.Find("test.foo", bson.M{}, opts)
+	cursor, err := mongo.GetDB("test").GetCollection("foo").Find(bson.M{}, opts)
+
 	if err != nil {
 		fmt.Printf("Error: %v", err)
 	}
@@ -25,15 +26,20 @@ func main() {
 		err = cursor.Next(&result)
 		fmt.Printf("%#v\n", result)
 	}
-	err = conn.Run("admin", bson.M{"isMaster": 1}, &result)
+
+	err = mongo.GetDB("admin").ExecuteCommand(bson.M{"isMaster": 1}, &result)
 	fmt.Printf("%#v\n", result)
 
-	err = conn.Insert("test.driver", bson.M{"price": 5})
-	err = conn.Update("test.driver", bson.M{"price": 5}, bson.M{"price": 15}, nil)
-	err = conn.Remove("test.driver", bson.M{"price": 15}, nil)
-	cursor2, err := conn.Find("test.driver", bson.M{}, nil)
+	c := mongo.GetDB("test").GetCollection("driver")
+
+	err = c.Insert(bson.M{"price": 5})
+	err = c.Update(bson.M{"price": 5}, bson.M{"price": 15}, nil)
+	err = c.Remove(bson.M{"price": 15}, nil)
+	cursor2, err := c.Find(bson.M{}, nil)
 	for cursor2.HasNext() {
 		err = cursor2.Next(&result)
 		fmt.Printf("%#v\n", result)
 	}
+
+	mongo.Close()
 }

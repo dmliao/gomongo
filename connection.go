@@ -8,21 +8,12 @@ import (
 type Conn interface {
 	Close() error
 	Error() error
-
-	Find(namespace string, query interface{}, options *FindOpts) (Cursor, error)
-	Insert(namespace string, docs ...interface{}) error
-	Update(namespace string, selector interface{}, update interface{}, options *UpdateOpts) error
-	Remove(namespace string, selector interface{}, options interface{}) error
-	GetMore(cursor Cursor) error
-	KillCursors(cursors ...Cursor) error
-	Run(database string, command interface{}, result interface{}) error
 }
 
 type Connection struct {
 	conn      net.Conn
 	address   string
 	requestID int32
-	cursors   map[int64]*cursorObj
 	err       error
 }
 

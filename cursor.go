@@ -19,17 +19,17 @@ type Cursor interface {
 }
 
 type cursorObj struct {
-	conn      *Connection
-	cursorID  int64
-	requestID int32
-	namespace string
-	limit     int32
-	batchSize int32
-	count     int32
-	docCount  int32
-	docs      [][]byte
-	err       error
-	flags     int32
+	collection *C
+	cursorID   int64
+	requestID  int32
+	namespace  string
+	limit      int32
+	batchSize  int32
+	count      int32
+	docCount   int32
+	docs       [][]byte
+	err        error
+	flags      int32
 }
 
 func (c *cursorObj) fatal(err error) error {
@@ -45,7 +45,7 @@ func (c *cursorObj) ID() int64 {
 }
 
 func (c *cursorObj) Namespace() string {
-	return c.namespace
+	return c.collection.database.name + "." + c.collection.name
 }
 
 func (c *cursorObj) BatchSize() int32 {
@@ -61,15 +61,15 @@ func (c *cursorObj) Close() error {
 		return nil
 	}
 	if c.requestID != 0 {
-		c.conn.cursors[c.cursorID] = nil
+		c.collection.cursors[c.cursorID] = nil
 	}
 	if c.cursorID != 0 {
-		c.conn.KillCursors(c)
+		c.collection.KillCursors(c)
 	}
 	c.err = MongoError{
 		message: "Cursor closed",
 	}
-	c.conn = nil
+	c.collection = nil
 	return nil
 }
 
@@ -89,7 +89,7 @@ func (c *cursorObj) getNextBatch() error {
 		return c.fatal(io.EOF)
 	}
 
-	_, err := c.conn.GetMore(c)
+	_, err := c.collection.GetMore(c)
 	if err != nil {
 		return c.fatal(err)
 	}
