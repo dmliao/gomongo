@@ -1,5 +1,9 @@
 package gomongo
 
+import (
+	"gopkg.in/mgo.v2/bson"
+)
+
 type Mongo interface {
 	GetDB(string) Database
 	//GetDBNameList() []string
@@ -26,4 +30,25 @@ func (m *MongoDB) Close() error {
 
 func (m *MongoDB) Error() error {
 	return nil
+}
+
+// checks if a mongo's connection is alive, if not, spins up a new
+// connection from the pool.
+func (m *MongoDB) checkAlive() error {
+
+	// ping the server
+	c := m.conn
+
+	admin := m.GetDB("admin")
+	var result bson.M
+	err := admin.ExecuteCommand(bson.M{"isMaster": 1}, &result)
+	if err != nil {
+		var err2 error
+		c.conn, err2 = c.connPool.Get()
+		if err2 != nil {
+			return err2
+		}
+	}
+	return nil
+
 }

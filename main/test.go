@@ -15,6 +15,7 @@ func main() {
 	opts := &gomongo.FindOpts{
 		BatchSize: 2,
 	}
+
 	cursor, err := mongo.GetDB("test").GetCollection("foo").Find(bson.M{}, opts)
 
 	if err != nil {

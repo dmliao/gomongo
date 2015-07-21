@@ -9,15 +9,17 @@ import (
 )
 
 func (c *Connection) receive() (*OpResponse, error) {
+	connection := c.conn
+
 	// Read the first 16 bytes for the message header
 	response := OpResponse{}
 	messageHeader := make([]byte, 16)
-	n, err := c.conn.Read(messageHeader)
+	n, err := connection.Read(messageHeader)
 	if err != nil {
 		if err != io.EOF {
 			fmt.Printf("error reading from connection: %v\n", err)
 		}
-		fmt.Printf("client %v closed connection\n", c.conn.RemoteAddr())
+		fmt.Printf("client %v closed connection\n", connection.RemoteAddr())
 		return nil, err
 	}
 	if n == 0 {
@@ -31,25 +33,25 @@ func (c *Connection) receive() (*OpResponse, error) {
 		return nil, err
 	}
 	response.Header = msgHeader
-	response.ResponseFlags, err = buffer.ReadInt32LE(c.conn)
+	response.ResponseFlags, err = buffer.ReadInt32LE(connection)
 	if err != nil {
 		return nil, err
 	}
 
-	response.CursorID, err = buffer.ReadInt64LE(c.conn)
+	response.CursorID, err = buffer.ReadInt64LE(connection)
 	if err != nil {
 		return nil, err
 	}
-	response.StartingFrom, err = buffer.ReadInt32LE(c.conn)
+	response.StartingFrom, err = buffer.ReadInt32LE(connection)
 	if err != nil {
 		return nil, err
 	}
-	response.NumberReturned, err = buffer.ReadInt32LE(c.conn)
+	response.NumberReturned, err = buffer.ReadInt32LE(connection)
 	if err != nil {
 		return nil, err
 	}
 	for i := int32(0); i < response.NumberReturned; i++ {
-		_, doc, err := buffer.ReadDocumentRaw(c.conn)
+		_, doc, err := buffer.ReadDocumentRaw(connection)
 		if err != nil {
 			return nil, err
 		}
@@ -58,14 +60,9 @@ func (c *Connection) receive() (*OpResponse, error) {
 
 	return &response, nil
 }
-func (c *Connection) receiveFindResponse(cursor *cursorObj) error {
-	res, err := c.receive()
+func receiveFindResponse(res *OpResponse, cursor *cursorObj) error {
 
-	if err != nil {
-		return err
-	}
 	cursor.docs = res.Document
 	cursor.cursorID = res.CursorID
-	cursor.err = err
 	return nil
 }

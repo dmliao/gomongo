@@ -57,6 +57,12 @@ func (c *C) Find(query interface{}, options *FindOpts) (Cursor, error) {
 
 	// flags
 	flags := int32(0)
+	if options != nil {
+		flags = convert.WriteBit32LE(flags, 1, options.Tailable)
+		flags = convert.WriteBit32LE(flags, 4, options.NoCursorTimeout)
+		flags = convert.WriteBit32LE(flags, 5, options.AwaitData)
+		flags = convert.WriteBit32LE(flags, 7, options.Partial)
+	}
 
 	queryBytes, err := bson.Marshal(query)
 	if err != nil {
@@ -88,7 +94,7 @@ func (c *C) Find(query interface{}, options *FindOpts) (Cursor, error) {
 	input[2] = respSize[2]
 	input[3] = respSize[3]
 
-	err = c.database.mongo.conn.send(input)
+	res, err := c.database.mongo.conn.sendWithResponse(input)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +107,7 @@ func (c *C) Find(query interface{}, options *FindOpts) (Cursor, error) {
 		flags:      flags,
 	}
 
-	err = c.database.mongo.conn.receiveFindResponse(&cursor)
+	receiveFindResponse(res, &cursor)
 
 	if err != nil {
 		return nil, err
@@ -279,7 +285,7 @@ func (c *C) GetMore(cursor Cursor) (Cursor, error) {
 	input[2] = respSize[2]
 	input[3] = respSize[3]
 
-	err := c.database.mongo.conn.send(input)
+	res, err := c.database.mongo.conn.sendWithResponse(input)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +308,7 @@ func (c *C) GetMore(cursor Cursor) (Cursor, error) {
 		}
 	}
 
-	err = c.database.mongo.conn.receiveFindResponse(cObj)
+	receiveFindResponse(res, cObj)
 
 	if err != nil {
 		return nil, err
