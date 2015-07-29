@@ -33,7 +33,7 @@ func (d *DB) GetCollection(cName string) Collection {
 	}
 }
 
-func (d *DB) ExecuteCommand(command interface{}, result interface{}) error {
+func (d *DB) run(socket *Connection, command interface{}, result interface{}) error {
 	commandBytes, err := bson.Marshal(command)
 	if err != nil {
 		return err
@@ -41,7 +41,7 @@ func (d *DB) ExecuteCommand(command interface{}, result interface{}) error {
 
 	namespace := d.name + ".$cmd"
 
-	requestID := d.mongo.conn.nextID()
+	requestID := d.mongo.nextID()
 
 	limit := int32(-1)
 	skip := int32(0)
@@ -65,17 +65,20 @@ func (d *DB) ExecuteCommand(command interface{}, result interface{}) error {
 	input[2] = respSize[2]
 	input[3] = respSize[3]
 
-	err = d.mongo.conn.send(input)
+	err = socket.send(input)
 	if err != nil {
 		return err
 	}
 
-	res, err := d.mongo.conn.receive()
+	res, err := socket.receive()
 	if err != nil {
 		return err
 	}
 
 	resultBytes := res.Document[0]
 	return bson.Unmarshal(resultBytes, result)
+}
 
+func (d *DB) ExecuteCommand(command interface{}, result interface{}) error {
+	return d.run(d.mongo.conn, command, result)
 }

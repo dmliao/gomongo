@@ -12,16 +12,10 @@ type Conn interface {
 }
 
 type Connection struct {
-	connPool  pool.Pool
-	conn      net.Conn
-	address   string
-	requestID int32
-	err       error
-}
-
-func (c *Connection) nextID() int32 {
-	c.requestID += 1
-	return c.requestID
+	connPool pool.Pool
+	conn     net.Conn
+	address  string
+	err      error
 }
 
 func (c *Connection) connect() error {
@@ -56,11 +50,14 @@ func (c *Connection) fatal(err error) error {
 }
 
 func (c *Connection) Close() error {
+	c.conn.Close()
+	c.conn = nil
+	c.connPool.Close()
 	return nil
 }
 
 func (c *Connection) Error() error {
-	return nil
+	return c.err
 }
 
 func (c *Connection) send(message []byte) error {

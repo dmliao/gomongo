@@ -35,7 +35,7 @@ type C struct {
 
 func (c *C) Find(query interface{}, options *FindOpts) (Cursor, error) {
 	namespace := c.database.GetName() + "." + c.name
-	requestID := c.database.mongo.conn.nextID()
+	requestID := c.database.mongo.nextID()
 
 	limit := int32(0)
 	skip := int32(0)
@@ -265,7 +265,7 @@ func (c *C) Remove(selector interface{}, options *RemoveOpts) error {
 }
 
 func (c *C) GetMore(cursor Cursor) (Cursor, error) {
-	requestID := c.database.mongo.conn.nextID()
+	requestID := c.database.mongo.nextID()
 	responseTo := int32(0)
 
 	fullCollectionBytes := []byte(cursor.Namespace())
@@ -317,7 +317,7 @@ func (c *C) GetMore(cursor Cursor) (Cursor, error) {
 }
 
 func (c *C) KillCursors(cursors ...Cursor) error {
-	requestID := c.database.mongo.conn.nextID()
+	requestID := c.database.mongo.nextID()
 	responseTo := int32(0)
 	buf := new(bytes.Buffer)
 	buffer.WriteToBuf(buf, int32(0), requestID, responseTo, int32(OP_KILL_CURSORS), int32(len(cursors)))

@@ -9,7 +9,8 @@ import (
 func main() {
 	mongo, err := gomongo.Connect("localhost")
 	if err != nil {
-		fmt.Printf("Error: %v", err)
+		fmt.Printf("Error connecting to mongoDB: %v", err)
+		return
 	}
 	fmt.Printf("%#v", mongo)
 	opts := &gomongo.FindOpts{
@@ -20,6 +21,7 @@ func main() {
 
 	if err != nil {
 		fmt.Printf("Error: %v", err)
+		return
 	}
 
 	var result bson.M

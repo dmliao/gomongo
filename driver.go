@@ -8,12 +8,9 @@ func Connect(address string) (Mongo, error) {
 	if strings.LastIndex(address, ":") <= strings.LastIndex(address, "]") {
 		address = address + ":27017"
 	}
-	c := Connection{
-		address: address,
-	}
 
 	m := MongoDB{
-		conn: &c,
+		servers: make(map[string]*Connection),
 	}
-	return &m, c.connect()
+	return &m, m.connect(address)
 }

@@ -1,6 +1,7 @@
 package gomongo
 
 import (
+	"github.com/dmliao/gomongo/convert"
 	"gopkg.in/mgo.v2/bson"
 )
 
@@ -13,8 +14,68 @@ type Mongo interface {
 }
 
 type MongoDB struct {
-	conn *Connection
-	err  error
+	conn      *Connection
+	servers   map[string]*Connection
+	master    *Connection
+	requestID int32
+	err       error
+}
+
+func (m *MongoDB) connectToSeed(seed string) error {
+	connection := &Connection{
+		address: seed,
+	}
+
+	connection.connect()
+
+	db := &DB{
+		name:  "admin",
+		mongo: m,
+	}
+	var result bson.M
+	db.run(connection, bson.M{"isMaster": 1}, &result)
+
+	meRaw, ok := result["me"]
+	me := seed
+	if ok {
+		me = convert.ToString(meRaw)
+		_, ok := m.servers[me]
+		if ok {
+			connection.Close()
+			return nil
+		}
+	}
+
+	isMaster := convert.ToBool(result["ismaster"])
+	if isMaster {
+		m.master = connection
+		m.conn = connection
+	}
+
+	m.servers[me] = connection
+
+	hostsRaw, ok := result["hosts"]
+	if ok {
+		hosts, err := convert.ConvertToStringSlice(hostsRaw)
+		if err != nil {
+			return err
+		}
+		for i := 0; i < len(hosts); i++ {
+			m.connectToSeed(hosts[i])
+		}
+	}
+
+	return nil
+
+}
+
+func (m *MongoDB) connect(seed string) error {
+	return m.connectToSeed(seed)
+}
+
+func (m *MongoDB) nextID() int32 {
+	m.requestID += 1
+	return m.requestID
 }
 
 func (m *MongoDB) GetDB(dName string) Database {
